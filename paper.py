@@ -14,6 +14,68 @@ from contextlib import ExitStack
 from urllib.error import HTTPError
 
 
+from scholarly import scholarly
+import time
+
+class GoogleScholarPaper:
+    def __init__(self, paper: dict):
+        self._paper = paper
+        self.score = None
+    
+    @property
+    def title(self) -> str:
+        return self._paper.get('bib', {}).get('title', '')
+    
+    @property
+    def summary(self) -> str:
+        return self._paper.get('bib', {}).get('abstract', '')
+    
+    @property
+    def authors(self) -> list[str]:
+        authors = self._paper.get('bib', {}).get('author', [])
+        if isinstance(authors, str):
+            return [authors]
+        return authors
+    
+    @property
+    def pdf_url(self) -> str:
+        return self._paper.get('eprint_url', '')
+    
+    @property
+    def url(self) -> str:
+        return self._paper.get('pub_url', '')
+    
+    @cached_property
+    def code_url(self) -> Optional[str]:
+        # 与 ArxivPaper 相同的实现
+        s = requests.Session()
+        retries = Retry(total=5, backoff_factor=0.1)
+        s.mount('https://', HTTPAdapter(max_retries=retries))
+        try:
+            response = s.get(f'https://paperswithcode.com/api/v1/papers/?search={self.title}')
+            results = response.json().get('results', [])
+            if results:
+                return results[0].get('url')
+        except Exception as e:
+            logger.debug(f'Error searching code for {self.title}: {e}')
+        return None
+    
+    @cached_property
+    def tldr(self) -> str:
+        # 使用与 ArxivPaper 相同的摘要生成逻辑
+        llm = get_llm()
+        prompt = f"""Generate a one-sentence TLDR summary in {llm.lang}:
+        Title: {self.title}
+        Abstract: {self.summary}
+        """
+        return llm.generate(
+            messages=[
+                {"role": "system", "content": "You are an expert at summarizing academic papers."},
+                {"role": "user", "content": prompt}
+            ]
+        )
+
+
 
 class ArxivPaper:
     def __init__(self,paper:arxiv.Result):
